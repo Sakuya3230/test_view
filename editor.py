@@ -68,7 +68,7 @@ class Editor(MayaQWidgetBaseMixin, utils.RunOnlyMixin, QtWidgets.QMainWindow):
         #             mago = treeView.Item("Hoge_{}_{}_{}".format(i, x, y), child)
                 
         model = treeView.CustomItemModel(root)
-        self.proxy_model = treeView.CustomProxyModel()
+        self.proxy_model = treeView.CustomSortFilterProxyModel()
         self.proxy_model.setSourceModel(model)
         
         self.view.setModel(self.proxy_model)
@@ -79,11 +79,11 @@ class Editor(MayaQWidgetBaseMixin, utils.RunOnlyMixin, QtWidgets.QMainWindow):
         
         line_edit.textChanged.connect(self.set_filter)
         
-        folder = r"D:\temp\seq01"  # シーケンス画像があるフォルダ
-        player = view.ImageSequenceWidget(folder, fps=24)
-        player.resize(500, 500)
+        # folder = r"D:\temp\seq01"  # シーケンス画像があるフォルダ
+        # player = view.ImageSequenceWidget(folder, fps=24)
+        # player.resize(500, 500)
         
-        self.verticalLayout_central.addWidget(player)
+        # self.verticalLayout_central.addWidget(player)
         
     # ----------------------------------------------------------------------------------
     # EVENT
