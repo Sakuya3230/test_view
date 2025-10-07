@@ -739,3 +739,334 @@ class CustomSortFilterProxyModel(QtCore.QAbstractProxyModel):
 
 # # 親を残す／子だけ繰り上げ
 # proxy.setKeepParentIfChildMatches(False)
+
+
+class HybridSortFilterProxyModel(QtCore.QSortFilterProxyModel):
+    """階層モード／フラットモードを切り替えられる SortFilterProxyModel"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._flatSorting = False
+        self._flatIndexes = []
+        self._sortColumn = 0
+        self._sortOrder = QtCore.Qt.AscendingOrder
+
+    # ---------------------------------
+    # モード切り替え
+    # ---------------------------------
+    def setFlatSortingEnabled(self, enabled: bool):
+        """Trueなら階層無視ソート"""
+        if self._flatSorting == enabled:
+            return
+        self._flatSorting = enabled
+        self.invalidate()
+
+    def isFlatSortingEnabled(self) -> bool:
+        return self._flatSorting
+
+    # ---------------------------------
+    # 再構築
+    # ---------------------------------
+    def invalidate(self):
+        if not self._flatSorting:
+            super().invalidate()
+            return
+
+        # フラット構築
+        self.beginResetModel()
+        self._flatIndexes = self._collect_all_indexes()
+        self._sort_flat_indexes()
+        self.endResetModel()
+
+    def _collect_all_indexes(self):
+        """階層を無視して全ノード収集"""
+        model = self.sourceModel()
+        if not model:
+            return []
+        result = []
+
+        def recurse(parent_index):
+            rows = model.rowCount(parent_index)
+            for row in range(rows):
+                index = model.index(row, self._sortColumn, parent_index)
+                result.append(index)
+                recurse(index)
+
+        recurse(QtCore.QModelIndex())
+        return result
+
+    def _sort_flat_indexes(self):
+        """指定カラムでソート"""
+        if not self._flatIndexes:
+            return
+        model = self.sourceModel()
+
+        def key_func(index):
+            return str(model.data(index, QtCore.Qt.DisplayRole))
+
+        reverse = self._sortOrder == QtCore.Qt.DescendingOrder
+        self._flatIndexes.sort(key=key_func, reverse=reverse)
+
+    # ---------------------------------
+    # ソート
+    # ---------------------------------
+    def sort(self, column, order=QtCore.Qt.AscendingOrder):
+        self._sortColumn = column
+        self._sortOrder = order
+        self.invalidate()
+        if not self._flatSorting:
+            super().sort(column, order)
+
+    # ---------------------------------
+    # フラットモード用（モデル構造）
+    # ---------------------------------
+    def rowCount(self, parent=QtCore.QModelIndex()):
+        if not self._flatSorting:
+            return super().rowCount(parent)
+        if parent.isValid():
+            return 0
+        return len(self._flatIndexes)
+
+    def columnCount(self, parent=QtCore.QModelIndex()):
+        model = self.sourceModel()
+        return model.columnCount(parent) if model else 0
+
+    def index(self, row, column, parent=QtCore.QModelIndex()):
+        if not self._flatSorting:
+            return super().index(row, column, parent)
+        if not self.hasIndex(row, column, parent):
+            return QtCore.QModelIndex()
+        return self.createIndex(row, column)
+
+    def parent(self, index):
+        if not self._flatSorting:
+            return super().parent(index)
+        return QtCore.QModelIndex()  # フラット時は親なし
+
+    def mapToSource(self, proxyIndex):
+        if not self._flatSorting:
+            return super().mapToSource(proxyIndex)
+        if not proxyIndex.isValid() or proxyIndex.row() >= len(self._flatIndexes):
+            return QtCore.QModelIndex()
+        sourceIndex = self._flatIndexes[proxyIndex.row()]
+        return self.sourceModel().index(sourceIndex.row(), proxyIndex.column(), sourceIndex.parent())
+
+    def mapFromSource(self, sourceIndex):
+        if not self._flatSorting:
+            return super().mapFromSource(sourceIndex)
+        try:
+            row = self._flatIndexes.index(sourceIndex.sibling(sourceIndex.row(), self._sortColumn))
+            return self.index(row, sourceIndex.column())
+        except ValueError:
+            return QtCore.QModelIndex()
+
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if not self._flatSorting:
+            return super().data(index, role)
+        if not index.isValid():
+            return None
+        sourceIndex = self.mapToSource(index)
+        return self.sourceModel().data(sourceIndex, role)
+
+
+# ---------------------------------
+# デモ
+# ---------------------------------
+# if __name__ == "__main__":
+#     app = QtWidgets.QApplication([])
+
+#     # ソースモデル（階層あり）
+#     model = QtGui.QStandardItemModel()
+#     model.setHorizontalHeaderLabels(["Name", "Value"])
+
+#     parentA = QtGui.QStandardItem("Parent A")
+#     parentA.appendRow([QtGui.QStandardItem("Child A1"), QtGui.QStandardItem("300")])
+#     parentA.appendRow([QtGui.QStandardItem("Child A2"), QtGui.QStandardItem("100")])
+
+#     parentB = QtGui.QStandardItem("Parent B")
+#     parentB.appendRow([QtGui.QStandardItem("Child B1"), QtGui.QStandardItem("200")])
+
+#     model.appendRow([parentA, QtGui.QStandardItem("")])
+#     model.appendRow([parentB, QtGui.QStandardItem("")])
+
+#     # プロキシモデル
+#     proxy = HybridSortFilterProxyModel()
+#     proxy.setSourceModel(model)
+
+#     # TreeView
+#     view = QtWidgets.QTreeView()
+#     view.setModel(proxy)
+#     view.setSortingEnabled(True)
+#     view.setAlternatingRowColors(True)
+#     view.setRootIsDecorated(True)
+#     view.setWindowTitle("Hybrid Sort (Flat / Hierarchy Toggle)")
+#     view.resize(400, 250)
+
+#     # トグルボタン
+#     toggle_btn = QtWidgets.QPushButton("Toggle Flat / Hierarchy")
+#     toggle_btn.setCheckable(True)
+#     toggle_btn.toggled.connect(lambda checked: (
+#         proxy.setFlatSortingEnabled(checked),
+#         view.setRootIsDecorated(not checked)
+#     ))
+
+#     layout = QtWidgets.QVBoxLayout()
+#     layout.addWidget(toggle_btn)
+#     layout.addWidget(view)
+
+#     w = QtWidgets.QWidget()
+#     w.setLayout(layout)
+#     w.show()
+
+#     app.exec_()
+
+
+class FlatSortProxyModel(QtCore.QAbstractProxyModel):
+    """階層を無視してフラットにソートするプロキシモデル"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._sourceModel = None
+        self._flatIndexes = []
+        self._sortColumn = 0
+        self._sortOrder = QtCore.Qt.AscendingOrder
+
+    # ---------------------------------
+    # 基本メソッド
+    # ---------------------------------
+    def setSourceModel(self, model):
+        if self._sourceModel:
+            self._sourceModel.dataChanged.disconnect(self.invalidate)
+            self._sourceModel.modelReset.disconnect(self.invalidate)
+            self._sourceModel.rowsInserted.disconnect(self.invalidate)
+            self._sourceModel.rowsRemoved.disconnect(self.invalidate)
+
+        self._sourceModel = model
+        if model:
+            model.dataChanged.connect(self.invalidate)
+            model.modelReset.connect(self.invalidate)
+            model.rowsInserted.connect(self.invalidate)
+            model.rowsRemoved.connect(self.invalidate)
+
+        self.invalidate()
+        super().setSourceModel(model)
+
+    def invalidate(self):
+        self.beginResetModel()
+        self._flatIndexes = self._collect_all_indexes()
+        self._sort_flat_indexes()
+        self.endResetModel()
+
+    def _collect_all_indexes(self):
+        """ソースモデル全体をフラット化"""
+        if not self._sourceModel:
+            return []
+        result = []
+
+        def recurse(parent_index):
+            rows = self._sourceModel.rowCount(parent_index)
+            for row in range(rows):
+                index = self._sourceModel.index(row, self._sortColumn, parent_index)
+                result.append(index)
+                recurse(index)
+
+        recurse(QtCore.QModelIndex())
+        return result
+
+    def _sort_flat_indexes(self):
+        """指定カラムでソート"""
+        if not self._flatIndexes:
+            return
+
+        def key_func(index):
+            return str(self._sourceModel.data(index, QtCore.Qt.DisplayRole))
+
+        self._flatIndexes.sort(key=key_func, reverse=(self._sortOrder == QtCore.Qt.DescendingOrder))
+
+    # ---------------------------------
+    # QAbstractProxyModel 必須実装
+    # ---------------------------------
+    def rowCount(self, parent=QtCore.QModelIndex()):
+        if parent.isValid():
+            return 0
+        return len(self._flatIndexes)
+
+    def columnCount(self, parent=QtCore.QModelIndex()):
+        return self._sourceModel.columnCount() if self._sourceModel else 0
+
+    def index(self, row, column, parent=QtCore.QModelIndex()):
+        if not self.hasIndex(row, column, parent):
+            return QtCore.QModelIndex()
+        return self.createIndex(row, column)
+
+    def parent(self, index):
+        return QtCore.QModelIndex()  # 常にフラット
+
+    def mapToSource(self, proxyIndex):
+        if not proxyIndex.isValid():
+            return QtCore.QModelIndex()
+        row = proxyIndex.row()
+        if row < 0 or row >= len(self._flatIndexes):
+            return QtCore.QModelIndex()
+        sourceIndex = self._flatIndexes[row]
+        return self._sourceModel.index(sourceIndex.row(), proxyIndex.column(), sourceIndex.parent())
+
+    def mapFromSource(self, sourceIndex):
+        if not sourceIndex.isValid():
+            return QtCore.QModelIndex()
+        try:
+            row = self._flatIndexes.index(sourceIndex.sibling(sourceIndex.row(), self._sortColumn))
+            return self.index(row, sourceIndex.column())
+        except ValueError:
+            return QtCore.QModelIndex()
+
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        sourceIndex = self.mapToSource(index)
+        return self._sourceModel.data(sourceIndex, role)
+
+    # ---------------------------------
+    # ソート呼び出し
+    # ---------------------------------
+    def sort(self, column, order=QtCore.Qt.AscendingOrder):
+        self._sortColumn = column
+        self._sortOrder = order
+        self.invalidate()
+
+
+# # ---------------------------------
+# # デモ用
+# # ---------------------------------
+# if __name__ == "__main__":
+#     app = QtWidgets.QApplication([])
+
+#     model = QtGui.QStandardItemModel()
+#     model.setHorizontalHeaderLabels(["Name", "Value"])
+
+#     # 階層構造データ
+#     parentA = QtGui.QStandardItem("Parent A")
+#     parentA.appendRow([QtGui.QStandardItem("Child A1"), QtGui.QStandardItem("100")])
+#     parentA.appendRow([QtGui.QStandardItem("Child A2"), QtGui.QStandardItem("300")])
+
+#     parentB = QtGui.QStandardItem("Parent B")
+#     parentB.appendRow([QtGui.QStandardItem("Child B1"), QtGui.QStandardItem("200")])
+
+#     model.appendRow([parentA, QtGui.QStandardItem("")])
+#     model.appendRow([parentB, QtGui.QStandardItem("")])
+
+#     # プロキシモデル
+#     proxy = FlatSortProxyModel()
+#     proxy.setSourceModel(model)
+#     proxy.sort(0, QtCore.Qt.AscendingOrder)
+
+#     # TreeView（フラット表示）
+#     view = QtWidgets.QTreeView()
+#     view.setModel(proxy)
+#     view.setRootIsDecorated(False)
+#     view.setAlternatingRowColors(True)
+#     view.setSortingEnabled(True)
+#     view.setWindowTitle("Flat Sort Proxy Model (Hierarchy Ignored)")
+#     view.resize(400, 250)
+#     view.show()
+
+#     app.exec_()
