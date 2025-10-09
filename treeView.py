@@ -1267,3 +1267,270 @@ for index in TreeModelIterator(model, mode=TreeModelIterator.DEPTH_FIRST):
 # 幅優先探索（逆方向）
 for index in TreeModelIterator(model, mode=TreeModelIterator.BREADTH_FIRST, forward=False):
     print(model.data(index))
+
+
+
+
+
+
+
+def iter_model(model, parent=QtCore.QModelIndex()):
+    stack = [parent]
+    while stack:
+        parent = stack.pop()
+        for row in reversed(range(model.rowCount(parent))):
+            child = model.index(row, 0, parent)
+            stack.append(child)
+        if parent.isValid():
+            yield parent
+
+
+from collections import deque
+from PySide2 import QtCore  # モデルが必要な場合
+
+def iter_model_bfs(model, parent=QtCore.QModelIndex()):
+    """
+    幅優先探索 BFS
+    """
+    queue = deque([parent])  # dequeで先頭から取り出す
+    while queue:
+        parent = queue.popleft()  # 先頭を取り出す
+        for row in range(model.rowCount(parent)):  # 子を順番通りに追加
+            child = model.index(row, 0, parent)
+            queue.append(child)
+        if parent.isValid():
+            yield parent
+            
+
+
+
+import sys
+from collections import deque
+
+PY2 = sys.version_info[0] == 2
+
+class TreeIterator(object):
+    """
+    Python2/3 両対応のMaya風ツリーイテレータ
+    DFS/BFS切替、深さ制限、prune対応
+    """
+    def __init__(self, roots, tree, mode="DFS", max_depth=None):
+        """
+        roots : list of root nodes
+        tree : dict(parent -> list of children)
+        mode : "DFS" or "BFS"
+        max_depth : 深さ制限（Noneで無制限）
+        """
+        self.tree = tree
+        self.roots = list(roots)
+        self.mode = mode.upper()
+        self.max_depth = max_depth
+        self.reset()
+
+    # -----------------------------
+    # イテレータプロトコル
+    # -----------------------------
+    if PY2:
+        def next(self):
+            return self._next()
+    else:
+        def __next__(self):
+            return self._next()
+
+    def _next(self):
+        if not self.stack:
+            self._done = True
+            raise StopIteration
+
+        node, depth = self.stack.pop() if self.mode=="DFS" else self.stack.popleft()
+        self._current = node
+        self._current_depth = depth
+
+        if self.max_depth is None or depth < self.max_depth:
+            children = self.tree.get(node, [])
+            entries = [(c, depth+1) for c in children]
+            if self.mode == "DFS":
+                # DFSは逆順で積む
+                self.stack.extend(reversed(entries))
+            else:
+                self.stack.extend(entries)
+
+        return node
+
+    def __iter__(self):
+        return self
+
+    # -----------------------------
+    # Maya風メソッド
+    # -----------------------------
+    def reset(self):
+        """
+        最初に戻す
+        """
+        entries = [(r, 0) for r in self.roots]
+        self.stack = list(reversed(entries)) if self.mode=="DFS" else deque(entries)
+        self._current = None
+        self._current_depth = 0
+        self._done = False
+
+    def isDone(self):
+        return self._done
+
+    def currentItem(self):
+        return self._current
+
+    def currentDepth(self):
+        return self._current_depth
+
+    def prune(self):
+        """
+        現在ノードの子ノードを探索対象から削除
+        """
+        if self._current is None:
+            return
+        children = self.tree.get(self._current, [])
+        if self.mode=="DFS":
+            self.stack = [(n,d) for n,d in self.stack if n not in children]
+        else:
+            self.stack = deque([(n,d) for n,d in self.stack if n not in children])
+
+
+
+
+from PySide2 import QtCore, QtWidgets
+from collections import deque
+
+# ----------------------------
+# TreeIterator（DFS/BFS切替、深さ制限）
+# ----------------------------
+class TreeIterator(object):
+    def __init__(self, roots, model, mode="DFS", max_depth=None):
+        self.model = model
+        self.roots = list(roots)
+        self.mode = mode.upper()
+        self.max_depth = max_depth
+        self.reset()
+
+    def __iter__(self):
+        return self
+
+    def _next(self):
+        if not self.stack:
+            raise StopIteration
+        index, depth = self.stack.pop() if self.mode=="DFS" else self.stack.popleft()
+        self._current = index
+        self._current_depth = depth
+
+        if self.max_depth is None or depth < self.max_depth:
+            rows = self.model.rowCount(index)
+            children = [self.model.index(r, 0, index) for r in range(rows)]
+            entries = [(c, depth+1) for c in children]
+            if self.mode=="DFS":
+                self.stack.extend(reversed(entries))
+            else:
+                self.stack.extend(entries)
+        return index
+
+    if QtCore.__version__[0] == "2":
+        next = _next
+    else:
+        __next__ = _next
+
+    def reset(self):
+        entries = [(r, 0) for r in self.roots]
+        self.stack = list(reversed(entries)) if self.mode=="DFS" else deque(entries)
+        self._current = None
+        self._current_depth = 0
+
+    def currentItem(self):
+        return self._current
+
+    def currentDepth(self):
+        return self._current_depth
+
+
+# ----------------------------
+# サンプルモデル
+# ----------------------------
+class SimpleTreeModel(QtCore.QAbstractItemModel):
+    def __init__(self, data, parent=None):
+        super(SimpleTreeModel, self).__init__(parent)
+        self._data = data  # dict: parent -> [children]
+        self._root = QtCore.QModelIndex()
+
+    def rowCount(self, parent):
+        if not parent.isValid():
+            return len(self._data.get("Root", []))
+        node = parent.internalPointer()
+        return len(self._data.get(node, []))
+
+    def columnCount(self, parent):
+        return 1
+
+    def index(self, row, column, parent):
+        if not parent.isValid():
+            node = self._data["Root"][row]
+        else:
+            node = self._data[parent.internalPointer()][row]
+        idx = self.createIndex(row, column, node)
+        return idx
+
+    def parent(self, index):
+        for parent, children in self._data.items():
+            if index.internalPointer() in children:
+                if parent == "Root":
+                    return QtCore.QModelIndex()
+                row = 0
+                return self.createIndex(row, 0, parent)
+        return QtCore.QModelIndex()
+
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if role == QtCore.Qt.DisplayRole and index.isValid():
+            return index.internalPointer()
+        return None
+
+# ----------------------------
+# ビューでメソッドごとにイテレータを使用
+# ----------------------------
+def method_a(model, tree_view):
+    print("Method A: 展開中のTargetを表示")
+    it = TreeIterator([QtCore.QModelIndex()], model, mode="DFS")
+    for idx in it:
+        name = model.data(idx)
+        if name.startswith("A") and tree_view.isExpanded(idx):
+            print("A展開中:", name)
+
+def method_b(model):
+    print("Method B: 名前でフィルタ")
+    it = TreeIterator([QtCore.QModelIndex()], model, mode="DFS")
+    for idx in it:
+        name = model.data(idx)
+        if name.startswith("B"):
+            print("Bフィルタ:", name)
+
+# ----------------------------
+# 実行例
+# ----------------------------
+if __name__ == "__main__":
+    import sys
+
+    app = QtWidgets.QApplication(sys.argv)
+
+    # データ構造
+    tree_data = {
+        "Root": ["A", "B"],
+        "A": ["A1", "A2"],
+        "B": ["B1"],
+        "A1": [], "A2": [], "B1": []
+    }
+
+    model = SimpleTreeModel(tree_data)
+    view = QtWidgets.QTreeView()
+    view.setModel(model)
+    view.show()
+
+    # メソッドごとにイテレータを作成
+    method_a(model, view)
+    method_b(model)
+
+    sys.exit(app.exec_())
