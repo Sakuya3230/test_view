@@ -1070,3 +1070,200 @@ class FlatSortProxyModel(QtCore.QAbstractProxyModel):
 #     view.show()
 
 #     app.exec_()
+
+
+def iter_model(model, parent=QtCore.QModelIndex(), filter_func=None):
+    """
+    QAbstractItemModelを深さ優先で探索するジェネレータ。
+    
+    Parameters
+    ----------
+    model : QAbstractItemModel
+        対象モデル
+    parent : QModelIndex
+        開始位置（通常は空の QModelIndex）
+    filter_func : callable or None
+        indexを受け取り、Trueを返す場合のみyieldされる関数
+        例: lambda model, index: "Target" in model.data(index)
+    
+    Yields
+    ------
+    QModelIndex
+        条件に一致したインデックス
+    """
+    stack = [parent]
+    while stack:
+        parent = stack.pop()
+        # 子ノードをスタックに追加（逆順にして正しい順序に）
+        for row in reversed(range(model.rowCount(parent))):
+            child = model.index(row, 0, parent)
+            stack.append(child)
+        if parent.isValid():
+            if filter_func is None or filter_func(model, parent):
+                yield parent
+                
+for index in iter_model(self.model()):
+    print(self.model().data(index))
+    
+for index in iter_model(self.model(),
+                        filter_func=lambda m, i: "bone" in m.data(i).lower()):
+    print("Found:", self.model().data(index))
+
+
+def iter_descendants(model, parent_index, filter_func=None):
+    """
+    指定した親インデックス以下の全ての子孫を深さ優先で探索するジェネレータ。
+
+    Parameters
+    ----------
+    model : QAbstractItemModel
+        探索対象のモデル
+    parent_index : QModelIndex
+        探索を開始する親インデックス
+    filter_func : callable or None
+        indexを受け取り、Trueを返す場合のみyieldされる関数
+        例: lambda model, index: "bone" in model.data(index).lower()
+
+    Yields
+    ------
+    QModelIndex
+        条件に一致した子孫インデックス
+    """
+    stack = [parent_index]
+    while stack:
+        parent = stack.pop()
+        row_count = model.rowCount(parent)
+        for row in reversed(range(row_count)):
+            child = model.index(row, 0, parent)
+            stack.append(child)
+            if filter_func is None or filter_func(model, child):
+                yield child
+                
+for index in tree.selectedIndexes():
+    print(f"=== {model.data(index)} の子孫 ===")
+    for child in iter_descendants(model, index):
+        print(" └", model.data(child))  
+        
+        
+def iter_ancestors(model, index, include_self=False, filter_func=None):
+    """
+    指定したインデックスから親方向へ祖先ノードをたどるジェネレータ。
+    ルートノードまで遡る。
+
+    Parameters
+    ----------
+    model : QAbstractItemModel
+        探索対象のモデル
+    index : QModelIndex
+        探索を開始するインデックス
+    include_self : bool
+        Trueの場合、最初に自身もyieldする
+    filter_func : callable or None
+        indexを受け取り、Trueを返す場合のみyieldされる関数
+
+    Yields
+    ------
+    QModelIndex
+        条件に一致した祖先インデックス
+    """
+    current = index if include_self else index.parent()
+
+    while current.isValid():
+        if filter_func is None or filter_func(model, current):
+            yield current
+        current = current.parent()
+        
+for index in tree.selectedIndexes():
+    print(f"=== {model.data(index)} の祖先 ===")
+    for parent in iter_ancestors(model, index):
+        print(" ↑", model.data(parent))
+        
+
+
+
+# -*- coding: utf-8 -*-
+from PySide2 import QtCore
+
+class TreeModelIterator:
+    DEPTH_FIRST = 0
+    BREADTH_FIRST = 1
+
+    def __init__(self, model, parent=QtCore.QModelIndex(), mode=DEPTH_FIRST, forward=True):
+        """
+        model : QAbstractItemModel
+        parent : 起点となる QModelIndex
+        mode : DEPTH_FIRST または BREADTH_FIRST
+        forward : True=順方向, False=逆方向
+        """
+        self._model = model
+        self._parent = parent
+        self._mode = mode
+        self._forward = forward
+
+    def __iter__(self):
+        """
+        幅優先・深さ優先探索を切り替えて反復
+        """
+        if self._mode == self.DEPTH_FIRST:
+            yield from self._iter_depth_first(self._parent)
+        else:
+            yield from self._iter_breadth_first(self._parent)
+
+    # -----------------------------
+    # 深さ優先探索（stackベース）
+    # -----------------------------
+    def _iter_depth_first(self, parent):
+        stack = []
+        rows = range(self._model.rowCount(parent))
+        if not self._forward:
+            rows = reversed(list(rows))
+
+        for row in rows:
+            stack.append(self._model.index(row, 0, parent))
+
+        while stack:
+            index = stack.pop()
+            yield index
+
+            # 子を追加
+            rows = range(self._model.rowCount(index))
+            if not self._forward:
+                rows = reversed(list(rows))
+
+            for row in rows:
+                stack.append(self._model.index(row, 0, index))
+
+    # -----------------------------
+    # 幅優先探索（queueベース）
+    # -----------------------------
+    def _iter_breadth_first(self, parent):
+        queue = []
+        rows = range(self._model.rowCount(parent))
+        if not self._forward:
+            rows = reversed(list(rows))
+
+        for row in rows:
+            queue.append(self._model.index(row, 0, parent))
+
+        while queue:
+            index = queue.pop(0)
+            yield index
+
+            rows = range(self._model.rowCount(index))
+            if not self._forward:
+                rows = reversed(list(rows))
+
+            for row in rows:
+                queue.append(self._model.index(row, 0, index))
+
+
+# model が QTreeView に設定されていると仮定
+model = treeView.model()
+
+# 深さ優先探索（順方向）
+for index in TreeModelIterator(model, mode=TreeModelIterator.DEPTH_FIRST):
+    print(model.data(index))
+
+# 幅優先探索（逆方向）
+for index in TreeModelIterator(model, mode=TreeModelIterator.BREADTH_FIRST, forward=False):
+    print(model.data(index))
