@@ -111,4 +111,48 @@ def main():
     win.show()
     app.exec_()
 
+
+
+
+
+
+
+def select_items_by_name(tree_view, model, target_names):
+    """
+    TreeView上で、指定された名前のアイテムを最速で選択状態にする。
+    """
+    sel_model = tree_view.selectionModel()
+    if not sel_model:
+        sel_model = QtCore.QItemSelectionModel(model)
+        tree_view.setSelectionModel(sel_model)
+
+    # 更新停止
+    tree_view.setUpdatesEnabled(False)
+    sel_model.blockSignals(True)
+
+    try:
+        # 一括選択用オブジェクト
+        selection = QtCore.QItemSelection()
+
+        # 非再帰で全アイテム走査
+        stack = [QtCore.QModelIndex()]
+        while stack:
+            parent = stack.pop()
+            for row in range(model.rowCount(parent)):
+                idx = model.index(row, 0, parent)
+                name = model.data(idx)
+                if name in target_names:
+                    selection.select(idx, idx)
+                stack.append(idx)
+
+        # 一括選択を適用（1回だけ）
+        sel_model.clearSelection()
+        sel_model.select(selection, QtCore.QItemSelectionModel.Select)
+        sel_model.setCurrentIndex(selection.indexes()[0], QtCore.QItemSelectionModel.Current)
+
+    finally:
+        # 更新再開
+        sel_model.blockSignals(False)
+        tree_view.setUpdatesEnabled(True)
+        tree_view.viewport().update()
     
