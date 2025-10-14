@@ -1534,3 +1534,63 @@ if __name__ == "__main__":
     method_b(model)
 
     sys.exit(app.exec_())
+
+
+
+# -*- coding: utf-8 -*-
+from PySide2 import QtWidgets, QtCore, QtGui
+
+class HoverTreeView(QtWidgets.QTreeView):
+    def __init__(self, parent=None):
+        super(HoverTreeView, self).__init__(parent)
+        self._hover_index = QtCore.QModelIndex()
+        self.setMouseTracking(True)  # ホバー検知を有効化
+
+    def mouseMoveEvent(self, event):
+        """マウスホバーしているインデックスを追跡"""
+        index = self.indexAt(event.pos())
+        if index != self._hover_index:
+            self._hover_index = index
+            self.viewport().update()  # 再描画
+        super(HoverTreeView, self).mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        """マウスがビュー外に出たらリセット"""
+        self._hover_index = QtCore.QModelIndex()
+        self.viewport().update()
+        super(HoverTreeView, self).leaveEvent(event)
+
+    def drawBranches(self, painter, rect, index):
+        """ブランチ（インデント部分）の描画をカスタマイズ"""
+        if index == self._hover_index:
+            color = QtGui.QColor(80, 100, 180, 50)  # 半透明のホバー色
+            painter.save()
+            painter.fillRect(rect, color)
+            painter.restore()
+        # 既定のブランチ描画も呼ぶ（枝線など）
+        super(HoverTreeView, self).drawBranches(painter, rect, index)
+
+
+# -------------------------------------------------------------
+# 動作サンプル
+# -------------------------------------------------------------
+if __name__ == "__main__":
+    import sys
+    app = QtWidgets.QApplication(sys.argv)
+
+    model = QtGui.QStandardItemModel()
+    model.setHorizontalHeaderLabels(["Items"])
+    parent = model.invisibleRootItem()
+    for i in range(10):
+        p = QtGui.QStandardItem(f"Parent {i}")
+        for j in range(3):
+            p.appendRow(QtGui.QStandardItem(f"Child {i}-{j}"))
+        parent.appendRow(p)
+
+    view = HoverTreeView()
+    view.setModel(model)
+    view.expandAll()
+    view.resize(400, 400)
+    view.show()
+
+    sys.exit(app.exec_())
