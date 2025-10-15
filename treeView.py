@@ -1776,3 +1776,39 @@ watcher = show_attribute_watcher()
 watcher.start_watch()
 # Channel Box / マニピュレータ / タイムスライダー / 再生 / NodeDirty の変化をログ表示
 watcher.stop_watch()
+
+
+from PySide2 import QtCore
+
+class NodeDeletionHandler:
+    def __init__(self, tree_model, proxy_model):
+        self.tree_model = tree_model
+        self.proxy_model = proxy_model
+        self.deleted_nodes = set()
+        self.timer = QtCore.QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.processDeletions)
+
+    def nodeRemovedCallback(self, node):
+        # 削除ノードをキューに追加
+        self.deleted_nodes.add(node)
+        # 50ms 後にまとめて処理
+        if not self.timer.isActive():
+            self.timer.start(50)
+
+    def processDeletions(self):
+        if not self.deleted_nodes:
+            return
+        # 一括削除処理
+        for node in self.deleted_nodes:
+            self.removeNodeItem(node)
+        self.deleted_nodes.clear()
+        # ProxyModelを1回だけ再構築
+        self.proxy_model._rebuildProxy()
+
+    def removeNodeItem(self, node):
+        # tree_modelからアイテム削除処理
+        idx = self.tree_model.findIndexByNode(node)
+        if idx.isValid():
+            self.tree_model.removeRow(idx.row(), idx.parent())
+
