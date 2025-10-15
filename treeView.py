@@ -1633,3 +1633,146 @@ class HoverTreeView(QtWidgets.QTreeView):
             painter.fillRect(rect, color)
             painter.restore()
         super(HoverTreeView, self).drawBranches(painter, rect, index)
+
+
+# -*- coding: utf-8 -*-
+from PySide2 import QtWidgets, QtCore
+from shiboken2 import wrapInstance
+import maya.OpenMayaUI as omui
+import maya.api.OpenMaya as om2
+import maya.OpenMaya as om1
+import maya.cmds as cmds
+
+class AttributeWatcherUI(QtWidgets.QDialog):
+    """UI付きで AttributeChanged / TimeChanged / NodeDirty を統合監視"""
+
+    def __init__(self, parent=None):
+        super(AttributeWatcherUI, self).__init__(parent)
+        self.setWindowTitle("Attribute Watcher")
+        self.setMinimumSize(600, 400)
+        self.setWindowFlags(self.windowFlags() ^ QtCore.Qt.WindowContextHelpButtonHint)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # ボタン
+        btn_layout = QtWidgets.QHBoxLayout()
+        self.start_btn = QtWidgets.QPushButton("監視開始")
+        self.stop_btn = QtWidgets.QPushButton("監視停止")
+        btn_layout.addWidget(self.start_btn)
+        btn_layout.addWidget(self.stop_btn)
+
+        # ログ
+        self.log_edit = QtWidgets.QPlainTextEdit()
+        self.log_edit.setReadOnly(True)
+
+        layout.addLayout(btn_layout)
+        layout.addWidget(self.log_edit)
+
+        # シグナル
+        self.start_btn.clicked.connect(self.start_watch)
+        self.stop_btn.clicked.connect(self.stop_watch)
+
+        # 内部状態
+        self._callback_ids = []
+        self._watched_obj = None
+        self._attrs = ["translateX", "translateY", "translateZ"]
+
+    # ----------------------------
+    # ログ
+    # ----------------------------
+    def append_log(self, text):
+        self.log_edit.appendPlainText(text)
+        sb = self.log_edit.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    # ----------------------------
+    # 監視開始
+    # ----------------------------
+    def start_watch(self):
+        self.stop_watch()
+
+        sel = om2.MGlobal.getActiveSelectionList()
+        if sel.length() == 0:
+            self.append_log("⚠ ノードが選択されていません。")
+            return
+
+        obj = sel.getDependNode(0)
+        self._watched_obj = obj
+        node_name = om2.MFnDependencyNode(obj).name()
+        self.append_log(f"✅ 監視開始: {node_name}")
+
+        # 1️⃣ アトリビュート変更
+        cid1 = om2.MNodeMessage.addAttributeChangedCallback(obj, self._on_attr_changed)
+        # 2️⃣ タイムスライダー変更
+        cid2 = om2.MEventMessage.addEventCallback("timeChanged", self._on_time_changed)
+        # 3️⃣ NodeDirty
+        cid3 = om1.MNodeMessage.addNodeDirtyCallback(obj, self._on_dirty)
+
+        self._callback_ids.extend([cid1, cid2, cid3])
+
+    # ----------------------------
+    # 監視停止
+    # ----------------------------
+    def stop_watch(self):
+        for cid in self._callback_ids:
+            try:
+                if isinstance(cid, int):
+                    om1.MMessage.removeCallback(cid)
+                else:
+                    om2.MMessage.removeCallback(cid)
+            except:
+                pass
+        self._callback_ids.clear()
+        if self._watched_obj:
+            node_name = om2.MFnDependencyNode(self._watched_obj).name()
+            self.append_log(f"🛑 監視停止: {node_name}")
+        self._watched_obj = None
+
+    # ----------------------------
+    # コールバック関数
+    # ----------------------------
+    def _on_attr_changed(self, msg, plug, otherPlug, clientData):
+        if not self._watched_obj:
+            return
+        if msg & om2.MNodeMessage.kAttributeSet:
+            fn_node = om2.MFnDependencyNode(self._watched_obj)
+            vals = [fn_node.findPlug(a, False).asDouble() for a in self._attrs]
+            self.append_log(f"[AttrChanged] {fn_node.name()} {dict(zip(self._attrs, vals))}")
+
+    def _on_time_changed(self, *args):
+        if not self._watched_obj:
+            return
+        fn_node = om2.MFnDependencyNode(self._watched_obj)
+        vals = [fn_node.findPlug(a, False).asDouble() for a in self._attrs]
+        current_time = cmds.currentTime(q=True)
+        self.append_log(f"[TimeChanged {current_time}] {fn_node.name()} {dict(zip(self._attrs, vals))}")
+
+    def _on_dirty(self, *args):
+        if not self._watched_obj:
+            return
+        fn_node = om2.MFnDependencyNode(self._watched_obj)
+        vals = [fn_node.findPlug(a, False).asDouble() for a in self._attrs]
+        self.append_log(f"[Dirty] {fn_node.name()} {dict(zip(self._attrs, vals))}")
+
+
+# ----------------------------
+# 起動関数
+# ----------------------------
+def get_maya_window():
+    ptr = omui.MQtUtil.mainWindow()
+    return wrapInstance(int(ptr), QtWidgets.QMainWindow)
+
+def show_attribute_watcher():
+    for w in QtWidgets.QApplication.allWidgets():
+        if isinstance(w, AttributeWatcherUI):
+            w.close()
+            w.deleteLater()
+    dlg = AttributeWatcherUI(parent=get_maya_window())
+    dlg.show()
+    return dlg
+
+
+watcher = show_attribute_watcher()
+watcher.start_watch()
+# Channel Box / マニピュレータ / タイムスライダー / 再生 / NodeDirty の変化をログ表示
+watcher.stop_watch()
