@@ -1594,3 +1594,42 @@ if __name__ == "__main__":
     view.show()
 
     sys.exit(app.exec_())
+
+# -*- coding: utf-8 -*-
+from PySide2 import QtWidgets, QtCore, QtGui
+
+class HoverTreeView(QtWidgets.QTreeView):
+    def __init__(self, parent=None):
+        super(HoverTreeView, self).__init__(parent)
+        self._hover_index = QtCore.QModelIndex()
+        self.setMouseTracking(True)
+
+    def _update_hover_index(self):
+        """現在のマウス位置からホバーインデックスを更新"""
+        pos = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+        index = self.indexAt(pos)
+        if index != self._hover_index:
+            self._hover_index = index
+            self.viewport().update()
+
+    def mouseMoveEvent(self, event):
+        self._update_hover_index()
+        super(HoverTreeView, self).mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover_index = QtCore.QModelIndex()
+        self.viewport().update()
+        super(HoverTreeView, self).leaveEvent(event)
+
+    def scrollContentsBy(self, dx, dy):
+        """スクロール操作でもホバー更新"""
+        super(HoverTreeView, self).scrollContentsBy(dx, dy)
+        self._update_hover_index()
+
+    def drawBranches(self, painter, rect, index):
+        if index == self._hover_index:
+            color = QtGui.QColor(80, 100, 180, 50)
+            painter.save()
+            painter.fillRect(rect, color)
+            painter.restore()
+        super(HoverTreeView, self).drawBranches(painter, rect, index)
