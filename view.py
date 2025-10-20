@@ -740,3 +740,77 @@ def show_palette():
 
 # if __name__ == "__main__":
 #     show_palette()
+
+
+def show_dock_window():
+    # 既存のものがあれば削除
+    if cmds.workspaceControl(MyDockWindow.UI_NAME + "WorkspaceControl", q=True, exists=True):
+        cmds.deleteUI(MyDockWindow.UI_NAME + "WorkspaceControl", control=True)
+
+    # Mayaのメインウィンドウを親に
+    main_window_ptr = omui.MQtUtil.mainWindow()
+    main_window = wrapInstance(int(main_window_ptr), QtWidgets.QWidget)
+
+    # インスタンス生成
+    ui = MyDockWindow(parent=main_window)
+
+    # ドッキング可能として表示
+    ui.show(dockable=True,
+            area='right',                   # ドッキング位置 (left, right, top, bottom)
+            floating=False,
+            allowedArea='all',
+            retain=False)                   # retain=True にすると再起動時にも保持される
+
+    return ui
+
+shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self)
+shortcut.setContext(QtCore.Qt.WidgetShortcut)  # ←ここが重要！
+shortcut.activated.connect(self.onShortcut)
+
+def keyPressEvent(self, event):
+    if event.key() == QtCore.Qt.Key_Space:
+        print("Space pressed in tool")
+        event.accept()  # ←このイベントだけ自前処理
+    else:
+        event.ignore()  # ←Mayaに渡す！
+        super(MyDockWindow, self).keyPressEvent(event)
+        
+def show_dock_window():
+    ui_name = MyDockWindow.UI_NAME
+    workspace_name = ui_name + "WorkspaceControl"
+
+    # 既にDockが存在する場合は削除
+    if cmds.workspaceControl(workspace_name, q=True, exists=True):
+        cmds.deleteUI(workspace_name, control=True)
+
+    # Mayaメインウィンドウを親に
+    from maya import OpenMayaUI as omui
+    from shiboken2 import wrapInstance
+    main_window = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
+
+    # ウィンドウ生成
+    ui = MyDockWindow(parent=main_window)
+
+    # Dock表示
+    ui.show(dockable=True,
+            area='right',
+            floating=False,
+            allowedArea='all',
+            retain=False)
+
+    return ui
+
+
+# 再利用法
+workspace_name = MyDockWindow.UI_NAME + "WorkspaceControl"
+
+if cmds.workspaceControl(workspace_name, q=True, exists=True):
+    cmds.workspaceControl(workspace_name, e=True, restore=True)
+else:
+    ui = MyDockWindow()
+    ui.show(dockable=True, area='right', floating=False)
+
+# 親を明示的に
+main_window = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
+ui = MyDockWindow(parent=main_window)
+ui.show(dockable=True, floating=True)
