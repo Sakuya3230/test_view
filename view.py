@@ -814,3 +814,38 @@ else:
 main_window = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
 ui = MyDockWindow(parent=main_window)
 ui.show(dockable=True, floating=True)
+
+
+class MyTool(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(MyTool, self).__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(QtWidgets.QLabel("Custom Tool"))
+        layout.addWidget(QtWidgets.QPushButton("OK"))
+
+def dock_widget(widget_class, name="MyToolDock"):
+    if cmds.workspaceControl(name, exists=True):
+        cmds.deleteUI(name)
+
+    control = cmds.workspaceControl(name, label="My Tool Dock", retain=False, floating=True)
+    qt_control = wrapInstance(int(OpenMayaUI.MQtUtil.findControl(name)), QtWidgets.QWidget)
+
+    tool_widget = widget_class()
+    layout = QtWidgets.QVBoxLayout(qt_control)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(tool_widget)
+
+    return tool_widget
+
+# 実行
+tool = dock_widget(MyTool)
+
+
+class MyDockUI(MayaQWidgetDockableMixin, QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(MyDockUI, self).__init__(parent)
+        self.setWindowTitle("Dockable Tool")
+        QtWidgets.QVBoxLayout(self).addWidget(QtWidgets.QLabel("Hello"))
+
+    def dockCloseEventTriggered(self):
+        print("Dock window closed!")  # closeEvent は呼ばれない
