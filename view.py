@@ -738,114 +738,291 @@ def show_palette():
     return win
 
 
-# if __name__ == "__main__":
-#     show_palette()
+
+# -*- coding: utf-8 -*-
+from maya import cmds, OpenMayaUI as omui
+from shiboken2 import wrapInstance
+from PySide2 import QtWidgets, QtCore
 
 
-def show_dock_window():
-    # 既存のものがあれば削除
-    if cmds.workspaceControl(MyDockWindow.UI_NAME + "WorkspaceControl", q=True, exists=True):
-        cmds.deleteUI(MyDockWindow.UI_NAME + "WorkspaceControl", control=True)
+DOCK_NAME = "MyDockableMainWindow"
 
-    # Mayaのメインウィンドウを親に
-    main_window_ptr = omui.MQtUtil.mainWindow()
-    main_window = wrapInstance(int(main_window_ptr), QtWidgets.QWidget)
 
-    # インスタンス生成
-    ui = MyDockWindow(parent=main_window)
+def delete_existing_dock(name=DOCK_NAME):
+    """既存のworkspaceControlを削除"""
+    if cmds.workspaceControl(name, q=True, exists=True):
+        cmds.deleteUI(name)
 
-    # ドッキング可能として表示
-    ui.show(dockable=True,
-            area='right',                   # ドッキング位置 (left, right, top, bottom)
-            floating=False,
-            allowedArea='all',
-            retain=False)                   # retain=True にすると再起動時にも保持される
 
-    return ui
+def get_maya_main_window():
+    """MayaのメインウィンドウをQt化"""
+    ptr = omui.MQtUtil.mainWindow()
+    return wrapInstance(int(ptr), QtWidgets.QWidget)
 
-shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+D"), self)
-shortcut.setContext(QtCore.Qt.WidgetShortcut)  # ←ここが重要！
-shortcut.activated.connect(self.onShortcut)
 
-def keyPressEvent(self, event):
-    if event.key() == QtCore.Qt.Key_Space:
-        print("Space pressed in tool")
-        event.accept()  # ←このイベントだけ自前処理
-    else:
-        event.ignore()  # ←Mayaに渡す！
-        super(MyDockWindow, self).keyPressEvent(event)
-        
-def show_dock_window():
-    ui_name = MyDockWindow.UI_NAME
-    workspace_name = ui_name + "WorkspaceControl"
+class MyDockMainWindow(QtWidgets.QMainWindow):
+    """ドッキング対応QMainWindow"""
 
-    # 既にDockが存在する場合は削除
+    def __init__(self, parent=None):
+        super(MyDockMainWindow, self).__init__(parent)
+        self.setObjectName("MyDockMainWindow")
+        self.setWindowTitle("My Dockable Window")
+        self.resize(600, 400)
+
+        # 中央ウィジェットを作成
+        central = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(central)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(QtWidgets.QLabel("ドッキング可能なQMainWindowです"))
+        layout.addWidget(QtWidgets.QPushButton("テストボタン"))
+        self.setCentralWidget(central)
+
+    # 閉じた時に呼ばれるイベント（再ドック時に利用）
+    def closeEvent(self, event):
+        print("Dock UI closed.")
+        event.accept()
+
+
+def create_dock_window():
+    """workspaceControlにQMainWindowを統合して表示"""
+    delete_existing_dock()
+
+    # QMainWindowインスタンスを作成
+    main_window = MyDockMainWindow(parent=get_maya_main_window())
+
+    # workspaceControlを作成
+    ctrl = cmds.workspaceControl(
+        DOCK_NAME,
+        label="My Dockable Window",
+        retain=False,
+        floating=True,
+        widthProperty="preferred",
+        initialWidth=600,
+        heightProperty="preferred",
+        initialHeight=400,
+    )
+
+    # workspaceControl → QWidget を取得
+    ctrl_ptr = omui.MQtUtil.findControl(ctrl)
+    ctrl_qt = wrapInstance(int(ctrl_ptr), QtWidgets.QWidget)
+
+    # layoutを取得してQMainWindowを追加
+    layout = ctrl_qt.layout()
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(main_window)
+
+    main_window.show()
+    return main_window
+
+
+# 実行
+if __name__ == "__main__":
+    ui = create_dock_window()
+
+
+
+from maya import cmds
+from maya import OpenMayaUI as omui
+from shiboken2 import wrapInstance
+from PySide2 import QtWidgets
+
+def dock_widget(widget, control_name="MyDockControl", label="Docked UI"):
+    # 既にworkspaceControlがあるなら削除
+    if cmds.workspaceControl(control_name, exists=True):
+        cmds.deleteUI(control_name)
+
+    # workspaceControlを作成
+    control = cmds.workspaceControl(control_name, label=label, retain=False)
+
+    # workspaceControlのQtウィジェットを取得
+    control_ptr = omui.MQtUtil.findControl(control)
+    control_widget = wrapInstance(int(control_ptr), QtWidgets.QWidget)
+
+    # 対象ウィジェットを再親化
+    widget.setParent(control_widget)
+    widget.show()
+
+    # サイズ設定（任意）
+    cmds.workspaceControl(control_name, e=True, resizeWidth=400, resizeHeight=300)
+    cmds.workspaceControl(control_name, e=True, restore=True)
+
+    return control
+
+
+# 例: 通常のQMainWindowやQDialogをドッキング可能にする
+win = QtWidgets.QMainWindow()
+win.setWindowTitle("Test Window")
+win.resize(500, 400)
+win.show()
+
+dock_widget(win, "MyDockTest")
+
+
+
+# -*- coding: utf-8 -*-
+from maya import cmds, OpenMayaUI as omui
+from PySide2 import QtWidgets, QtCore
+from shiboken2 import wrapInstance
+
+# ============================================================
+# ユーティリティ関数
+# ============================================================
+def get_active_window():
+    """
+    現在アクティブなPySideウィンドウを返す。
+    MayaメインウィンドウやDock済みウィンドウは除外。
+    """
+    app = QtWidgets.QApplication.instance()
+    win = app.activeWindow()
+    if not win:
+        return None
+
+    maya_main = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
+    if win == maya_main:
+        return None
+
+    # すでにworkspaceControl内に含まれる場合も除外
+    parent = win.parent()
+    while parent:
+        if "workspaceControl" in parent.objectName():
+            return None
+        parent = parent.parent()
+
+    return win
+
+
+def dock_widget(widget, control_name=None):
+    """
+    指定したQtウィジェットをworkspaceControlにドッキング
+    """
+    if widget is None:
+        return
+
+    if not control_name:
+        control_name = widget.objectName() or widget.windowTitle() or "DockedWidget"
+
+    workspace_name = control_name + "WorkspaceControl"
+
+    # 既存workspaceControl削除
     if cmds.workspaceControl(workspace_name, q=True, exists=True):
         cmds.deleteUI(workspace_name, control=True)
 
-    # Mayaメインウィンドウを親に
-    from maya import OpenMayaUI as omui
-    from shiboken2 import wrapInstance
-    main_window = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
+    # workspaceControl作成
+    cmds.workspaceControl(workspace_name, label=widget.windowTitle() or control_name)
 
-    # ウィンドウ生成
-    ui = MyDockWindow(parent=main_window)
+    ptr = omui.MQtUtil.findControl(workspace_name)
+    control_widget = wrapInstance(int(ptr), QtWidgets.QWidget)
 
-    # Dock表示
-    ui.show(dockable=True,
-            area='right',
-            floating=False,
-            allowedArea='all',
-            retain=False)
-
-    return ui
-
-
-# 再利用法
-workspace_name = MyDockWindow.UI_NAME + "WorkspaceControl"
-
-if cmds.workspaceControl(workspace_name, q=True, exists=True):
-    cmds.workspaceControl(workspace_name, e=True, restore=True)
-else:
-    ui = MyDockWindow()
-    ui.show(dockable=True, area='right', floating=False)
-
-# 親を明示的に
-main_window = wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QWidget)
-ui = MyDockWindow(parent=main_window)
-ui.show(dockable=True, floating=True)
-
-
-class MyTool(QtWidgets.QWidget):
-    def __init__(self, parent=None):
-        super(MyTool, self).__init__(parent)
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(QtWidgets.QLabel("Custom Tool"))
-        layout.addWidget(QtWidgets.QPushButton("OK"))
-
-def dock_widget(widget_class, name="MyToolDock"):
-    if cmds.workspaceControl(name, exists=True):
-        cmds.deleteUI(name)
-
-    control = cmds.workspaceControl(name, label="My Tool Dock", retain=False, floating=True)
-    qt_control = wrapInstance(int(OpenMayaUI.MQtUtil.findControl(name)), QtWidgets.QWidget)
-
-    tool_widget = widget_class()
-    layout = QtWidgets.QVBoxLayout(qt_control)
+    # レイアウトに追加
+    layout = QtWidgets.QVBoxLayout(control_widget)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(tool_widget)
+    layout.addWidget(widget)
+    widget.show()
 
-    return tool_widget
-
-# 実行
-tool = dock_widget(MyTool)
+    cmds.workspaceControl(workspace_name, e=True, restore=True)
+    print(f"✅ Docked {widget.windowTitle() or control_name} to {workspace_name}")
 
 
-class MyDockUI(MayaQWidgetDockableMixin, QtWidgets.QWidget):
-    def __init__(self, parent=None):
-        super(MyDockUI, self).__init__(parent)
-        self.setWindowTitle("Dockable Tool")
-        QtWidgets.QVBoxLayout(self).addWidget(QtWidgets.QLabel("Hello"))
+# ============================================================
+# Dock監視クラス
+# ============================================================
+class DockWaiter(QtCore.QObject):
+    """
+    アクティブウィンドウを監視してドッキング確認ダイアログを出す
+    """
+    def __init__(self, interval_ms=500):
+        super(DockWaiter, self).__init__()
+        self.timer = QtCore.QTimer()
+        self.timer.setInterval(interval_ms)
+        self.timer.timeout.connect(self._check_active_window)
+        self.last_active = None
+        self.dialog_active = False
 
-    def dockCloseEventTriggered(self):
-        print("Dock window closed!")  # closeEvent は呼ばれない
+    def start(self):
+        print("🕒 ドッキング対象ウィンドウの選択待機中...（ウィンドウをクリックしてください）")
+        self.timer.start()
+
+    def stop(self):
+        self.timer.stop()
+        self.last_active = None
+        self.dialog_active = False
+
+    def _check_active_window(self):
+        if self.dialog_active:
+            return
+
+        win = get_active_window()
+        if not win:
+            return
+
+        if win != self.last_active:
+            self.last_active = win
+            self.dialog_active = True
+            self._ask_user(win)
+
+    def _ask_user(self, win):
+        title = win.windowTitle() or win.objectName() or "Unnamed Window"
+        reply = QtWidgets.QMessageBox.question(
+            None,
+            "Dock ウィンドウ確認",
+            f"「{title}」をドッキングウィンドウにしますか？",
+            QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel | QtWidgets.QMessageBox.Retry
+        )
+
+        if reply == QtWidgets.QMessageBox.Ok:
+            self.stop()
+            dock_widget(win)
+            QtWidgets.QMessageBox.information(None, "完了", f"{title} をドッキングしました。")
+        elif reply == QtWidgets.QMessageBox.Retry:
+            print("🕓 もう一度選ぶ: 再度ウィンドウを選択してください。")
+            self.dialog_active = False
+            self.last_active = None
+        else:  # Cancel
+            print("❌ 監視モード終了")
+            self.stop()
+
+
+# ============================================================
+# メインUI
+# ============================================================
+class MainDockUI(QtWidgets.QMainWindow):
+    def __init__(self):
+        super(MainDockUI, self).__init__()
+        self.setWindowTitle("Main Dock UI")
+        self.resize(500, 300)
+        self.central = QtWidgets.QWidget()
+        self.setCentralWidget(self.central)
+
+        self.layout = QtWidgets.QVBoxLayout(self.central)
+        self.layout.setContentsMargins(5, 5, 5, 5)
+
+        # Dock監視ボタン
+        self.dock_button = QtWidgets.QPushButton("Dock監視モード開始")
+        self.dock_button.clicked.connect(self.start_dock_watch)
+        self.layout.addWidget(self.dock_button)
+
+        # DockWaiterインスタンス
+        self.waiter = DockWaiter()
+
+    def start_dock_watch(self):
+        print("▶ Dock監視モード開始")
+        self.waiter.start()
+
+
+# ============================================================
+# 実行関数
+# ============================================================
+_main_ui_instance = None
+
+def show_main_ui():
+    global _main_ui_instance
+    if _main_ui_instance is None:
+        _main_ui_instance = MainDockUI()
+        # Mayaメインウィンドウに親設定
+        ptr = omui.MQtUtil.mainWindow()
+        main_win = wrapInstance(int(ptr), QtWidgets.QWidget)
+        _main_ui_instance.setParent(main_win)
+        _main_ui_instance.show()
+    else:
+        _main_ui_instance.raise_()
+        _main_ui_instance.activateWindow()
