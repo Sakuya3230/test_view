@@ -1026,3 +1026,83 @@ def show_main_ui():
     else:
         _main_ui_instance.raise_()
         _main_ui_instance.activateWindow()
+
+
+# -*- coding: utf-8 -*-
+from maya import OpenMayaUI as omui
+from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
+from PySide2 import QtWidgets, QtCore
+import shiboken2
+
+
+def get_maya_main_window():
+    ptr = omui.MQtUtil.mainWindow()
+    return shiboken2.wrapInstance(int(ptr), QtWidgets.QMainWindow)
+
+
+# --------------------------------------------
+# Dock可能なMixinクラス
+# --------------------------------------------
+class DockedWindow(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
+    def __init__(self, parent=None):
+        super(DockedWindow, self).__init__(parent)
+        self.setWindowTitle("Docked Mixin Window")
+        self.setObjectName("DockedMixinWindow")
+
+        # 子ウィンドウの参照を保持
+        self.child_window = None
+
+        # レイアウト
+        central = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(central)
+        self.setCentralWidget(central)
+
+        open_btn = QtWidgets.QPushButton("Open Child Window")
+        open_btn.clicked.connect(self.open_child)
+        layout.addWidget(open_btn)
+
+    def open_child(self):
+        if self.child_window is None or not self.child_window.isVisible():
+            self.child_window = ChildWindow(parent=get_maya_main_window())
+            self.child_window.show()
+
+    # Dockモードで閉じるときに呼ばれる
+    def dockCloseEventTriggered(self):
+        print("Docked Mixin closed")
+        if self.child_window and self.child_window.isVisible():
+            print("→ Closing child window")
+            self.child_window.close()
+        return super(DockedWindow, self).dockCloseEventTriggered()
+
+
+# --------------------------------------------
+# 通常ウィンドウ
+# --------------------------------------------
+class ChildWindow(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super(ChildWindow, self).__init__(parent)
+        self.setWindowTitle("Child Window")
+        self.setObjectName("ChildWindow")
+        self.resize(300, 200)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        label = QtWidgets.QLabel("This is a child window.")
+        layout.addWidget(label)
+
+    def closeEvent(self, event):
+        print("Child window closed")
+        event.accept()
+
+
+# --------------------------------------------
+# 実行
+# --------------------------------------------
+def show_docked_window():
+    win = DockedWindow(get_maya_main_window())
+    win.show(dockable=True)
+    return win
+
+
+# 呼び出し
+if __name__ == "__main__":
+    show_docked_window()
